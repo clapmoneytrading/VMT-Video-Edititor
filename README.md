@@ -41,6 +41,10 @@ Instead of installing and running three separate AI projects manually, the noteb
 | 📝 **Whisper large-v3-turbo** | Speech-to-Text with word timestamps | JSON / TXT / SRT |
 | 🖼️ **Real-ESRGAN** | AI image upscaling | `.png` / ZIP batch |
 
+
+https://github.com/user-attachments/assets/3b93c7ca-b169-4554-997c-523fbd1845b6
+
+
 The notebook is split into two major stages:
 
 **1. Warm-up / setup** → cache models, prepare isolated runners, create the runtime.
