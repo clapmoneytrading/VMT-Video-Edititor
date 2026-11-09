@@ -1,0 +1,5 @@
+.git
+.gitignore
+tryaitoday-autoeditor-local/node_modules
+tryaitoday-autoeditor-local/dist
+New Text Document.txt

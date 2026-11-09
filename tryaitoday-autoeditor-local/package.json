@@ -1,0 +1,39 @@
+{
+  "name": "tryaitoday-autoeditor-local",
+  "productName": "TryAIToday AutoEditor",
+  "version": "1.0.0",
+  "private": true,
+  "main": "electron-main.cjs",
+  "scripts": {
+    "start": "node server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.tryaitoday.autoeditor.local",
+    "productName": "TryAIToday AutoEditor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron-main.cjs",
+      "server.js",
+      "editor/**/*",
+      "_next/**/*",
+      "logo.svg",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}

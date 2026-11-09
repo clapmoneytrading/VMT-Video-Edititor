@@ -1,0 +1,5 @@
+tryaitoday-autoeditor-local/node_modules/
+tryaitoday-autoeditor-local/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
