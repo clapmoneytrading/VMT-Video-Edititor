@@ -98,9 +98,9 @@ function registerIpc() {
     const defaultName = (arg && typeof arg.defaultName === 'string' && arg.defaultName.trim()) || 'project.autoedit.json';
     if (!content) return { canceled: true, message: 'No project content to save.' };
     const res = await dialog.showSaveDialog(win || undefined, {
-      title: 'Save AutoEditor project',
+      title: 'Save CMT Editor project',
       defaultPath: lastProjectFilePath || path.join(app.getPath('downloads'), defaultName),
-      filters: [{ name: 'AutoEditor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
+      filters: [{ name: 'CMT Editor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
     });
     if (res.canceled || !res.filePath) return { canceled: true };
     fs.mkdirSync(path.dirname(res.filePath), { recursive: true });
@@ -113,10 +113,10 @@ function registerIpc() {
   ipcMain.handle('project-file:open', async () => {
     const win = BrowserWindow.getFocusedWindow();
     const res = await dialog.showOpenDialog(win || undefined, {
-      title: 'Open AutoEditor project',
+      title: 'Open CMT Editor project',
       properties: ['openFile'],
       defaultPath: lastProjectFilePath || app.getPath('downloads'),
-      filters: [{ name: 'AutoEditor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
+      filters: [{ name: 'CMT Editor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
     });
     if (res.canceled || !res.filePaths || !res.filePaths[0]) return { canceled: true };
     const filePath = res.filePaths[0];
@@ -159,7 +159,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'TryAIToday AutoEditor',
+    title: 'CMT Editor',
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -179,9 +179,9 @@ function createWindow() {
     const name = item.getFilename();
     if (name.endsWith('.autoedit.json')) {
       item.setSaveDialogOptions({
-        title: 'Save AutoEditor project',
+        title: 'Save CMT Editor project',
         defaultPath: name,
-        filters: [{ name: 'AutoEditor project', extensions: ['json'] }],
+        filters: [{ name: 'CMT Editor project', extensions: ['json'] }],
       });
       return;
     }

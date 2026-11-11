@@ -1,6 +1,6 @@
 {
-  "name": "tryaitoday-autoeditor-local",
-  "productName": "TryAIToday AutoEditor",
+  "name": "cmt-editor-local",
+  "productName": "CMT Editor",
   "version": "1.0.0",
   "private": true,
   "main": "electron-main.cjs",
@@ -17,8 +17,8 @@
     "electron-builder": "^26.0.0"
   },
   "build": {
-    "appId": "com.tryaitoday.autoeditor.local",
-    "productName": "TryAIToday AutoEditor",
+    "appId": "com.cmt.editor.local",
+    "productName": "CMT Editor",
     "directories": {
       "output": "dist"
     },

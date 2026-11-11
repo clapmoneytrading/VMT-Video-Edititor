@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const path = require('path');
 
 const app = express();
@@ -51,7 +51,7 @@ app.use((err, req, res, next) => {
 });
 
 const server = app.listen(port, host, () => {
-  console.log(`Autoeditor local server listening on http://${host}:${port}`);
+  console.log(`CMT Editor local server listening on http://${host}:${port}`);
 });
 
 function shutdown() {
