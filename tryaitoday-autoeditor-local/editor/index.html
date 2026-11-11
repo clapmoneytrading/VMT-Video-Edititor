@@ -489,13 +489,20 @@
         var gain = Number(tr.gain == null ? 1 : tr.gain);
         for (var j = 0; j < tr.files.length; j++) {
           var file = tr.files[j];
-          var ab = await file.arrayBuffer();
-          var buffer = await decodeCtx.decodeAudioData(ab.slice(0));
+          var buffer = null;
+          try {
+            var ab = await file.arrayBuffer();
+            buffer = await decodeCtx.decodeAudioData(ab.slice(0));
+          } catch (e) {
+            buffer = null;
+          }
+          if (!buffer) continue;
           var start = Number(tr.offsetSec || 0);
           decoded.push({ start: start, buffer: buffer, gain: isFinite(gain) ? gain : 1 });
           endSec = Math.max(endSec, start + buffer.duration);
         }
       }
+      if (!decoded.length) return null;
       var sr = 44100;
       var offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(endSec * sr)), sr);
       decoded.forEach(function (d) {
@@ -531,7 +538,8 @@
     }
   }
   function addTrack(type) {
-    tracks.push({ id: 'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7), name: 'Track ' + (trackSeq++), type: type || 'visual', offsetSec: 0, files: [] });
+    var t = type || 'visual';
+    tracks.push({ id: 'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7), name: 'Track ' + (trackSeq++), type: t, offsetSec: 0, gain: t === 'music' ? 0.45 : 1, files: [] });
     renderTracks();
   }
   function removeTrack(id) {
@@ -558,6 +566,7 @@
     var musicTracks = tracks.filter(function (t) { return t.type === 'music' && t.files.length; });
 
     var mediaFiles = [];
+    var extraAudio = [];
     mediaTracks.forEach(function (t) {
       t.files.forEach(function (f, idx) {
         var base = parseTimePrefix(f.name);
@@ -565,6 +574,9 @@
         var when = Number(t.offsetSec || 0) + base;
         var renamed = toStampName(when, f.name);
         mediaFiles.push(new File([f], renamed, { type: f.type || 'application/octet-stream', lastModified: f.lastModified || Date.now() }));
+        if ((f.type || '').indexOf('video/') === 0 && Number(t.gain || 0) > 0) {
+          extraAudio.push({ files: [f], offsetSec: when, gain: Number(t.gain || 1) });
+        }
       });
     });
 
@@ -576,14 +588,15 @@
     }
 
     var musicOk = true;
-    if (musicTracks.length) {
+    if (musicTracks.length || extraAudio.length) {
       var audioInput = findUploadInput('audio');
       var existingVoice = await getCurrentVoiceFile();
       var mixSources = [];
       if (existingVoice) mixSources.push({ files: [existingVoice], offsetSec: 0, gain: voiceGain });
       musicTracks.forEach(function (t) {
-        mixSources.push({ files: t.files, offsetSec: Number(t.offsetSec || 0), gain: 0.45 });
+        mixSources.push({ files: t.files, offsetSec: Number(t.offsetSec || 0), gain: Number(t.gain || 0.45) });
       });
+      extraAudio.forEach(function (s) { mixSources.push(s); });
       var mixFile = await buildAudioMixFile(mixSources);
       musicOk = !!mixFile && setInputFiles(audioInput, [mixFile]);
       if (!musicOk) status('Could not import mixed music to voiceover track.', true);
@@ -624,6 +637,20 @@
       off.value = String(t.offsetSec || 0);
       off.setAttribute('style', 'width:72px;border:1px solid #334155;background:#0f172a;color:#fff;border-radius:6px;padding:4px 6px');
       off.oninput = function () { t.offsetSec = Number(off.value || 0); };
+      var vol = document.createElement('input');
+      vol.type = 'range';
+      vol.min = '0';
+      vol.max = '2';
+      vol.step = '0.05';
+      vol.value = String(Number(t.gain == null ? (t.type === 'music' ? 0.45 : 1) : t.gain));
+      vol.setAttribute('style', 'width:90px');
+      var volVal = document.createElement('span');
+      volVal.textContent = Number(vol.value).toFixed(2) + 'x';
+      volVal.setAttribute('style', 'color:#cbd5e1;min-width:42px');
+      vol.oninput = function () {
+        t.gain = Number(vol.value || 1);
+        volVal.textContent = t.gain.toFixed(2) + 'x';
+      };
       var addBtn = btn('Add files', function () { pickTrackFiles(t.id); });
       addBtn.style.padding = '4px 8px';
       addBtn.style.font = '600 12px system-ui,sans-serif';
@@ -637,6 +664,8 @@
       row.appendChild(name);
       row.appendChild(type);
       row.appendChild(off);
+      row.appendChild(vol);
+      row.appendChild(volVal);
       row.appendChild(addBtn);
       row.appendChild(count);
       row.appendChild(del);
