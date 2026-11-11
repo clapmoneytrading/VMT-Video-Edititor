@@ -469,22 +469,28 @@
     }
     return new Blob([out], { type: 'audio/wav' });
   }
-  async function buildMusicMixFile(audioTracks) {
-    if (!audioTracks.length) return null;
+  async function buildAudioMixFile(sources) {
+    if (!sources.length) return null;
     var Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx || !window.OfflineAudioContext) return audioTracks[0].files[0] || null;
+    if (!Ctx || !window.OfflineAudioContext) {
+      for (var si = 0; si < sources.length; si++) {
+        if (sources[si].files && sources[si].files.length) return sources[si].files[0];
+      }
+      return null;
+    }
     var decodeCtx = new Ctx();
     try {
       var decoded = [];
       var endSec = 0;
-      for (var i = 0; i < audioTracks.length; i++) {
-        var tr = audioTracks[i];
+      for (var i = 0; i < sources.length; i++) {
+        var tr = sources[i];
+        var gain = Number(tr.gain == null ? 1 : tr.gain);
         for (var j = 0; j < tr.files.length; j++) {
           var file = tr.files[j];
           var ab = await file.arrayBuffer();
           var buffer = await decodeCtx.decodeAudioData(ab.slice(0));
           var start = Number(tr.offsetSec || 0);
-          decoded.push({ start: start, buffer: buffer });
+          decoded.push({ start: start, buffer: buffer, gain: isFinite(gain) ? gain : 1 });
           endSec = Math.max(endSec, start + buffer.duration);
         }
       }
@@ -493,7 +499,10 @@
       decoded.forEach(function (d) {
         var src = offline.createBufferSource();
         src.buffer = d.buffer;
-        src.connect(offline.destination);
+        var g = offline.createGain();
+        g.gain.value = d.gain;
+        src.connect(g);
+        g.connect(offline.destination);
         src.start(Math.max(0, d.start));
       });
       var mixed = await offline.startRendering();
@@ -501,6 +510,22 @@
       return new File([wav], 'tracks_mix.wav', { type: 'audio/wav' });
     } finally {
       decodeCtx.close().catch(function () {});
+    }
+  }
+  async function getCurrentVoiceFile() {
+    var audioInput = findUploadInput('audio');
+    if (audioInput && audioInput.files && audioInput.files[0]) return audioInput.files[0];
+
+    var audioEl = document.querySelector('audio[src]');
+    if (!audioEl || !audioEl.src) return null;
+    try {
+      var res = await fetch(audioEl.src);
+      if (!res.ok) return null;
+      var blob = await res.blob();
+      var ext = blob.type && blob.type.indexOf('wav') >= 0 ? '.wav' : '.mp3';
+      return new File([blob], 'existing_voice' + ext, { type: blob.type || 'audio/mpeg' });
+    } catch (e) {
+      return null;
     }
   }
   function addTrack(type) {
@@ -551,7 +576,13 @@
     var musicOk = true;
     if (musicTracks.length) {
       var audioInput = findUploadInput('audio');
-      var mixFile = await buildMusicMixFile(musicTracks);
+      var existingVoice = await getCurrentVoiceFile();
+      var mixSources = [];
+      if (existingVoice) mixSources.push({ files: [existingVoice], offsetSec: 0, gain: 1 });
+      musicTracks.forEach(function (t) {
+        mixSources.push({ files: t.files, offsetSec: Number(t.offsetSec || 0), gain: 0.45 });
+      });
+      var mixFile = await buildAudioMixFile(mixSources);
       musicOk = !!mixFile && setInputFiles(audioInput, [mixFile]);
       if (!musicOk) status('Could not import mixed music to voiceover track.', true);
     }
