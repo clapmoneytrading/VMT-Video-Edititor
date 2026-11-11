@@ -5,6 +5,46 @@
 
   var DB_NAME = 'autoeditor', PROJ = 'projects', MEDIA = 'media';
   var FORMAT = 'autoeditor-project', VERSION = 1;
+  var storageObserver = null;
+
+  function hideStorageUsedUi() {
+    var nodes = Array.prototype.slice.call(document.querySelectorAll('*'));
+    nodes.forEach(function (el) {
+      var txt = (el && el.textContent) ? el.textContent.trim() : '';
+      if (!txt || !/Storage\s*used/i.test(txt)) return;
+      var box = el.closest('button,div');
+      if (box) box.style.display = 'none';
+    });
+  }
+
+  function disableStorageLimitChecks() {
+    var maxQuota = 1099511627776; // 1 TB virtual quota for app-side checks.
+    try {
+      var s = navigator.storage;
+      if (!s || typeof s.estimate !== 'function' || s.__aeEstimatePatched) return;
+      var orig = s.estimate.bind(s);
+      var patched = function () {
+        return Promise.resolve(orig()).then(function (info) {
+          info = info || {};
+          return {
+            usage: Number(info.usage || 0),
+            quota: Math.max(Number(info.quota || 0), maxQuota)
+          };
+        }).catch(function () {
+          return { usage: 0, quota: maxQuota };
+        });
+      };
+      try { s.estimate = patched; }
+      catch (_) { try { Object.defineProperty(s, 'estimate', { value: patched }); } catch (_) {} }
+      s.__aeEstimatePatched = true;
+    } catch (_) {}
+
+    hideStorageUsedUi();
+    if (!storageObserver && typeof MutationObserver === 'function') {
+      storageObserver = new MutationObserver(function () { hideStorageUsedUi(); });
+      storageObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
+  }
 
   function openDB() {
     return new Promise(function (resolve, reject) {
@@ -572,6 +612,7 @@
   }
 
   function mount() {
+    disableStorageLimitChecks();
     var box = document.createElement('div');
     box.setAttribute('style', 'margin-top:10px;display:flex;flex-direction:column;gap:8px');
     var title = document.createElement('div');
