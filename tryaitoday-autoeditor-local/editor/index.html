@@ -573,11 +573,14 @@
 
   function mount() {
     var box = document.createElement('div');
-    box.setAttribute('style', 'position:fixed;right:12px;bottom:12px;z-index:2147483000;display:flex;flex-direction:column;align-items:flex-end;gap:6px');
+    box.setAttribute('style', 'margin-top:10px;display:flex;flex-direction:column;gap:8px');
+    var title = document.createElement('div');
+    title.setAttribute('style', 'font:700 12px system-ui,sans-serif;letter-spacing:.02em;color:#e2e8f0;background:rgba(15,23,42,.9);padding:6px 8px;border-radius:6px');
+    title.textContent = 'Project tools and tracks';
     statusEl = document.createElement('div');
-    statusEl.setAttribute('style', 'max-width:420px;font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;display:none');
+    statusEl.setAttribute('style', 'font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;display:none');
     var row = document.createElement('div');
-    row.setAttribute('style', 'display:flex;gap:8px');
+    row.setAttribute('style', 'display:flex;flex-wrap:wrap;gap:8px');
     row.appendChild(btn('Projects', function () { return openProjects(); }));
     row.appendChild(btn('Save project', function () { return saveProject(false); }));
     row.appendChild(btn('Save project as', function () { return saveProject(true); }));
@@ -589,16 +592,22 @@
     row.appendChild(btn('+ Overlay', function () { addTrack('overlay'); }));
     row.appendChild(btn('Apply tracks', function () { return applyTracksToEditor(); }));
     renderPathEl = document.createElement('div');
-    renderPathEl.setAttribute('style', 'max-width:520px;font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;color:#bfdbfe;display:block');
+    renderPathEl.setAttribute('style', 'font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;color:#bfdbfe;display:block');
     renderPathEl.textContent = 'Render save folder: loading...';
     tracksEl = document.createElement('div');
-    tracksEl.setAttribute('style', 'display:flex;flex-direction:column;gap:6px;align-items:flex-end');
+    tracksEl.setAttribute('style', 'display:flex;flex-direction:column;gap:6px;align-items:stretch');
     renderTracks();
+    box.appendChild(title);
     box.appendChild(tracksEl);
     box.appendChild(renderPathEl);
     box.appendChild(statusEl);
     box.appendChild(row);
-    document.body.appendChild(box);
+    var zones = document.querySelector('main .onboard__zones');
+    if (zones && zones.parentNode) zones.parentNode.insertBefore(box, zones.nextSibling);
+    else {
+      var mountTarget = document.querySelector('main .content') || document.querySelector('.content') || document.body;
+      mountTarget.appendChild(box);
+    }
     var origStatus = status;
     status = function (msg, isErr) { statusEl.style.display = 'block'; origStatus(msg, isErr); };
     refreshRenderPath().catch(function () { setRenderPathText(null); });
