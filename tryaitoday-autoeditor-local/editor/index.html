@@ -227,6 +227,46 @@
     openProjects().catch(function (e) { status('Could not list projects: ' + (e && e.message || e), true); });
   };
 
+  var renderPathEl = null;
+  function shortPath(p) {
+    p = String(p || '');
+    if (p.length <= 52) return p;
+    return p.slice(0, 24) + '...' + p.slice(-24);
+  }
+  function setRenderPathText(info) {
+    if (!renderPathEl) return;
+    if (!info || !info.path) {
+      renderPathEl.textContent = 'Render save folder: unavailable in browser mode';
+      return;
+    }
+    renderPathEl.textContent = 'Render save folder: ' + shortPath(info.path) + (info.isDefault ? ' (default)' : '');
+  }
+  async function refreshRenderPath() {
+    if (!window.aeDesktop || !window.aeDesktop.getRenderPath) {
+      setRenderPathText(null);
+      return;
+    }
+    setRenderPathText(await window.aeDesktop.getRenderPath());
+  }
+  async function pickRenderPath() {
+    if (!window.aeDesktop || !window.aeDesktop.pickRenderPath) {
+      status('Render folder picker is only available in the desktop app.', true);
+      return;
+    }
+    var info = await window.aeDesktop.pickRenderPath();
+    setRenderPathText(info);
+    if (!info.canceled) status('Render folder updated. New renders will save there.');
+  }
+  async function resetRenderPath() {
+    if (!window.aeDesktop || !window.aeDesktop.resetRenderPath) {
+      status('Render folder reset is only available in the desktop app.', true);
+      return;
+    }
+    var info = await window.aeDesktop.resetRenderPath();
+    setRenderPathText(info);
+    status('Render folder reset to Downloads.');
+  }
+
   function mount() {
     var box = document.createElement('div');
     box.setAttribute('style', 'position:fixed;right:12px;bottom:12px;z-index:2147483000;display:flex;flex-direction:column;align-items:flex-end;gap:6px');
@@ -237,11 +277,18 @@
     row.appendChild(btn('Projects', function () { return openProjects(); }));
     row.appendChild(btn('Save project file', saveProject));
     row.appendChild(btn('Open project file', function () { pickFile(); }));
+    row.appendChild(btn('Render folder', function () { return pickRenderPath(); }));
+    row.appendChild(btn('Use Downloads', function () { return resetRenderPath(); }));
+    renderPathEl = document.createElement('div');
+    renderPathEl.setAttribute('style', 'max-width:520px;font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;color:#bfdbfe;display:block');
+    renderPathEl.textContent = 'Render save folder: loading...';
+    box.appendChild(renderPathEl);
     box.appendChild(statusEl);
     box.appendChild(row);
     document.body.appendChild(box);
     var origStatus = status;
     status = function (msg, isErr) { statusEl.style.display = 'block'; origStatus(msg, isErr); };
+    refreshRenderPath().catch(function () { setRenderPathText(null); });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);

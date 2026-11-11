@@ -24,6 +24,7 @@
     },
     "files": [
       "electron-main.cjs",
+      "preload.cjs",
       "server.js",
       "editor/**/*",
       "_next/**/*",
