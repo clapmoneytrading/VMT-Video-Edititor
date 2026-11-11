@@ -359,6 +359,218 @@
     status('Render folder reset to Downloads.');
   }
 
+  var tracks = [];
+  var tracksEl = null;
+  var trackSeq = 1;
+  function parseTimePrefix(name) {
+    var m = String(name || '').match(/(\d+)[-_](\d+)/);
+    if (!m) return null;
+    return Number(m[1]) * 60 + Number(m[2]);
+  }
+  function toStampName(seconds, originalName) {
+    var s = Math.max(0, Math.round(seconds || 0));
+    var mm = Math.floor(s / 60);
+    var ss = s % 60;
+    var n = String(originalName || 'clip.png');
+    var dot = n.lastIndexOf('.');
+    var ext = dot > -1 ? n.slice(dot) : '.png';
+    return mm + '-' + String(ss).padStart(2, '0') + ext;
+  }
+  function findUploadInput(kind) {
+    var all = Array.prototype.slice.call(document.querySelectorAll('input[type="file"]'));
+    if (kind === 'audio') {
+      return all.find(function (x) { return (x.accept || '').indexOf('audio') >= 0; }) || null;
+    }
+    return all.find(function (x) {
+      var a = x.accept || '';
+      return a.indexOf('image') >= 0 || a.indexOf('video') >= 0;
+    }) || null;
+  }
+  function setInputFiles(input, files) {
+    if (!input || !files || !files.length) return false;
+    var dt = new DataTransfer();
+    files.forEach(function (f) { dt.items.add(f); });
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  function wavFromAudioBuffer(buf) {
+    var channels = Math.min(2, buf.numberOfChannels || 1);
+    var sampleRate = buf.sampleRate;
+    var length = buf.length;
+    var bytesPerSample = 2;
+    var blockAlign = channels * bytesPerSample;
+    var dataSize = length * blockAlign;
+    var out = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(out);
+    function w(offset, str) { for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+    w(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    w(8, 'WAVE');
+    w(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    w(36, 'data');
+    view.setUint32(40, dataSize, true);
+    var pos = 44;
+    var chData = [];
+    for (var c = 0; c < channels; c++) chData.push(buf.getChannelData(c));
+    for (var i = 0; i < length; i++) {
+      for (var c = 0; c < channels; c++) {
+        var v = Math.max(-1, Math.min(1, chData[c][i]));
+        view.setInt16(pos, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+        pos += 2;
+      }
+    }
+    return new Blob([out], { type: 'audio/wav' });
+  }
+  async function buildMusicMixFile(audioTracks) {
+    if (!audioTracks.length) return null;
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx || !window.OfflineAudioContext) return audioTracks[0].files[0] || null;
+    var decodeCtx = new Ctx();
+    try {
+      var decoded = [];
+      var endSec = 0;
+      for (var i = 0; i < audioTracks.length; i++) {
+        var tr = audioTracks[i];
+        for (var j = 0; j < tr.files.length; j++) {
+          var file = tr.files[j];
+          var ab = await file.arrayBuffer();
+          var buffer = await decodeCtx.decodeAudioData(ab.slice(0));
+          var start = Number(tr.offsetSec || 0);
+          decoded.push({ start: start, buffer: buffer });
+          endSec = Math.max(endSec, start + buffer.duration);
+        }
+      }
+      var sr = 44100;
+      var offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(endSec * sr)), sr);
+      decoded.forEach(function (d) {
+        var src = offline.createBufferSource();
+        src.buffer = d.buffer;
+        src.connect(offline.destination);
+        src.start(Math.max(0, d.start));
+      });
+      var mixed = await offline.startRendering();
+      var wav = wavFromAudioBuffer(mixed);
+      return new File([wav], 'tracks_mix.wav', { type: 'audio/wav' });
+    } finally {
+      decodeCtx.close().catch(function () {});
+    }
+  }
+  function addTrack(type) {
+    tracks.push({ id: 'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7), name: 'Track ' + (trackSeq++), type: type || 'visual', offsetSec: 0, files: [] });
+    renderTracks();
+  }
+  function removeTrack(id) {
+    tracks = tracks.filter(function (t) { return t.id !== id; });
+    renderTracks();
+  }
+  function pickTrackFiles(id) {
+    var tr = tracks.find(function (t) { return t.id === id; });
+    if (!tr) return;
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = tr.type === 'music' ? 'audio/*' : 'image/*,video/*';
+    input.onchange = function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      tr.files = tr.files.concat(files);
+      renderTracks();
+    };
+    input.click();
+  }
+  async function applyTracksToEditor() {
+    if (!tracks.length) { status('Add at least one track first.', true); return; }
+    var mediaTracks = tracks.filter(function (t) { return t.type !== 'music' && t.files.length; });
+    var musicTracks = tracks.filter(function (t) { return t.type === 'music' && t.files.length; });
+
+    var mediaFiles = [];
+    mediaTracks.forEach(function (t) {
+      t.files.forEach(function (f, idx) {
+        var base = parseTimePrefix(f.name);
+        if (base == null) base = idx * 3;
+        var when = Number(t.offsetSec || 0) + base;
+        var renamed = toStampName(when, f.name);
+        mediaFiles.push(new File([f], renamed, { type: f.type || 'application/octet-stream', lastModified: f.lastModified || Date.now() }));
+      });
+    });
+
+    var mediaOk = true;
+    if (mediaFiles.length) {
+      var mediaInput = findUploadInput('media');
+      mediaOk = setInputFiles(mediaInput, mediaFiles);
+      if (!mediaOk) status('Could not find storyboard upload input.', true);
+    }
+
+    var musicOk = true;
+    if (musicTracks.length) {
+      var audioInput = findUploadInput('audio');
+      var mixFile = await buildMusicMixFile(musicTracks);
+      musicOk = !!mixFile && setInputFiles(audioInput, [mixFile]);
+      if (!musicOk) status('Could not import mixed music to voiceover track.', true);
+    }
+
+    if (mediaOk && musicOk) {
+      status('Tracks applied. Click Build timeline to render all imported tracks.');
+    }
+  }
+  function renderTracks() {
+    if (!tracksEl) return;
+    tracksEl.innerHTML = '';
+    if (!tracks.length) {
+      var empty = document.createElement('div');
+      empty.setAttribute('style', 'font:12px system-ui,sans-serif;color:#cbd5e1;background:rgba(15,23,42,.9);padding:6px 8px;border-radius:6px');
+      empty.textContent = 'No tracks yet. Use + Visual, + Music, or + Overlay.';
+      tracksEl.appendChild(empty);
+      return;
+    }
+    tracks.forEach(function (t) {
+      var row = document.createElement('div');
+      row.setAttribute('style', 'display:flex;align-items:center;gap:6px;max-width:900px;background:rgba(15,23,42,.9);padding:6px 8px;border-radius:6px;font:12px system-ui,sans-serif;color:#e2e8f0');
+      var name = document.createElement('input');
+      name.value = t.name;
+      name.setAttribute('style', 'width:110px;border:1px solid #334155;background:#0f172a;color:#fff;border-radius:6px;padding:4px 6px');
+      name.oninput = function () { t.name = name.value; };
+      var type = document.createElement('select');
+      type.setAttribute('style', 'border:1px solid #334155;background:#0f172a;color:#fff;border-radius:6px;padding:4px 6px');
+      ['visual', 'overlay', 'music'].forEach(function (k) {
+        var o = document.createElement('option');
+        o.value = k; o.textContent = k; if (k === t.type) o.selected = true;
+        type.appendChild(o);
+      });
+      type.onchange = function () { t.type = type.value; t.files = []; renderTracks(); };
+      var off = document.createElement('input');
+      off.type = 'number';
+      off.step = '0.1';
+      off.value = String(t.offsetSec || 0);
+      off.setAttribute('style', 'width:72px;border:1px solid #334155;background:#0f172a;color:#fff;border-radius:6px;padding:4px 6px');
+      off.oninput = function () { t.offsetSec = Number(off.value || 0); };
+      var addBtn = btn('Add files', function () { pickTrackFiles(t.id); });
+      addBtn.style.padding = '4px 8px';
+      addBtn.style.font = '600 12px system-ui,sans-serif';
+      var count = document.createElement('span');
+      count.textContent = t.files.length + ' files';
+      count.setAttribute('style', 'color:#93c5fd');
+      var del = btn('Delete', function () { removeTrack(t.id); });
+      del.style.padding = '4px 8px';
+      del.style.font = '600 12px system-ui,sans-serif';
+      del.style.borderColor = '#7f1d1d';
+      row.appendChild(name);
+      row.appendChild(type);
+      row.appendChild(off);
+      row.appendChild(addBtn);
+      row.appendChild(count);
+      row.appendChild(del);
+      tracksEl.appendChild(row);
+    });
+  }
+
   function mount() {
     var box = document.createElement('div');
     box.setAttribute('style', 'position:fixed;right:12px;bottom:12px;z-index:2147483000;display:flex;flex-direction:column;align-items:flex-end;gap:6px');
@@ -372,9 +584,17 @@
     row.appendChild(btn('Open project file', function () { return openProject(); }));
     row.appendChild(btn('Render folder', function () { return pickRenderPath(); }));
     row.appendChild(btn('Use Downloads', function () { return resetRenderPath(); }));
+    row.appendChild(btn('+ Visual', function () { addTrack('visual'); }));
+    row.appendChild(btn('+ Music', function () { addTrack('music'); }));
+    row.appendChild(btn('+ Overlay', function () { addTrack('overlay'); }));
+    row.appendChild(btn('Apply tracks', function () { return applyTracksToEditor(); }));
     renderPathEl = document.createElement('div');
     renderPathEl.setAttribute('style', 'max-width:520px;font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;color:#bfdbfe;display:block');
     renderPathEl.textContent = 'Render save folder: loading...';
+    tracksEl = document.createElement('div');
+    tracksEl.setAttribute('style', 'display:flex;flex-direction:column;gap:6px;align-items:flex-end');
+    renderTracks();
+    box.appendChild(tracksEl);
     box.appendChild(renderPathEl);
     box.appendChild(statusEl);
     box.appendChild(row);
