@@ -7,6 +7,7 @@ const path = require('path');
 const PREFERRED_PORT = Number(process.env.PORT) || 3000;
 let URL = '';
 let renderSaveDir = null;
+let lastProjectFilePath = null;
 
 function prefsPath() {
   return path.join(app.getPath('userData'), 'preferences.json');
@@ -19,6 +20,9 @@ function loadPrefs() {
     if (p && typeof p.renderSaveDir === 'string' && p.renderSaveDir.trim()) {
       renderSaveDir = p.renderSaveDir;
     }
+    if (p && typeof p.lastProjectFilePath === 'string' && p.lastProjectFilePath.trim()) {
+      lastProjectFilePath = p.lastProjectFilePath;
+    }
   } catch (_) {
     // Keep defaults when no preferences file exists yet.
   }
@@ -27,7 +31,11 @@ function loadPrefs() {
 function savePrefs() {
   try {
     fs.mkdirSync(path.dirname(prefsPath()), { recursive: true });
-    fs.writeFileSync(prefsPath(), JSON.stringify({ renderSaveDir: renderSaveDir || '' }, null, 2), 'utf8');
+    fs.writeFileSync(
+      prefsPath(),
+      JSON.stringify({ renderSaveDir: renderSaveDir || '', lastProjectFilePath: lastProjectFilePath || '' }, null, 2),
+      'utf8'
+    );
   } catch (err) {
     console.error('Could not save preferences:', err && err.message ? err.message : err);
   }
@@ -69,6 +77,53 @@ function registerIpc() {
     renderSaveDir = null;
     savePrefs();
     return { path: getEffectiveRenderSaveDir(), isDefault: true };
+  });
+
+  ipcMain.handle('project-file:get-last-path', () => ({ path: lastProjectFilePath || '' }));
+
+  ipcMain.handle('project-file:save', async (_event, arg) => {
+    const filePath = arg && typeof arg.path === 'string' ? arg.path : '';
+    const content = arg && typeof arg.content === 'string' ? arg.content : '';
+    if (!filePath || !content) return { ok: false, message: 'Missing file path or content.' };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+    lastProjectFilePath = filePath;
+    savePrefs();
+    return { ok: true, path: filePath };
+  });
+
+  ipcMain.handle('project-file:save-as', async (_event, arg) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const content = arg && typeof arg.content === 'string' ? arg.content : '';
+    const defaultName = (arg && typeof arg.defaultName === 'string' && arg.defaultName.trim()) || 'project.autoedit.json';
+    if (!content) return { canceled: true, message: 'No project content to save.' };
+    const res = await dialog.showSaveDialog(win || undefined, {
+      title: 'Save AutoEditor project',
+      defaultPath: lastProjectFilePath || path.join(app.getPath('downloads'), defaultName),
+      filters: [{ name: 'AutoEditor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePath) return { canceled: true };
+    fs.mkdirSync(path.dirname(res.filePath), { recursive: true });
+    fs.writeFileSync(res.filePath, content, 'utf8');
+    lastProjectFilePath = res.filePath;
+    savePrefs();
+    return { canceled: false, path: res.filePath };
+  });
+
+  ipcMain.handle('project-file:open', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    const res = await dialog.showOpenDialog(win || undefined, {
+      title: 'Open AutoEditor project',
+      properties: ['openFile'],
+      defaultPath: lastProjectFilePath || app.getPath('downloads'),
+      filters: [{ name: 'AutoEditor project', extensions: ['autoedit.json', 'json'] }, { name: 'JSON', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths[0]) return { canceled: true };
+    const filePath = res.filePaths[0];
+    const text = fs.readFileSync(filePath, 'utf8');
+    lastProjectFilePath = filePath;
+    savePrefs();
+    return { canceled: false, path: filePath, text };
   });
 }
 

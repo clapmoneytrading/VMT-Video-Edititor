@@ -43,6 +43,69 @@
     return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
+  var SAVE_MAP_KEY = 'aeProjectFilePaths';
+  function getPathMap() {
+    try { return JSON.parse(localStorage.getItem(SAVE_MAP_KEY) || '{}') || {}; }
+    catch (e) { return {}; }
+  }
+  function getSavedPathForProject(id) {
+    if (!id) return '';
+    return getPathMap()[id] || '';
+  }
+  function setSavedPathForProject(id, filePath) {
+    if (!id || !filePath) return;
+    var map = getPathMap();
+    map[id] = filePath;
+    try { localStorage.setItem(SAVE_MAP_KEY, JSON.stringify(map)); } catch (e) {}
+  }
+  function getLocalStorageSnapshot() {
+    var out = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k) out[k] = localStorage.getItem(k);
+      }
+    } catch (e) {}
+    return out;
+  }
+  function restoreLocalStorageSnapshot(snap) {
+    if (!snap || typeof snap !== 'object') return;
+    try {
+      Object.keys(snap).forEach(function (k) {
+        var v = snap[k];
+        if (typeof v === 'string') localStorage.setItem(k, v);
+      });
+    } catch (e) {}
+  }
+  async function resolveCurrentProjectId(db) {
+    var id = new URLSearchParams(location.search).get('id');
+    if (id) return id;
+    var all = await req(db.transaction(PROJ, 'readonly').objectStore(PROJ).getAll());
+    all.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    return all.length ? all[0].id : '';
+  }
+  async function buildProjectPayload(db, id) {
+    var project = await req(db.transaction(PROJ, 'readonly').objectStore(PROJ).get(id));
+    if (!project) return null;
+    var prefix = id + '/';
+    var range = IDBKeyRange.bound(prefix, prefix + '\uffff');
+    var ms = db.transaction(MEDIA, 'readonly').objectStore(MEDIA);
+    var rk = ms.getAllKeys(range), rv = ms.getAll(range);
+    var keys = await req(rk), vals = await req(rv);
+    var media = [];
+    for (var i = 0; i < keys.length; i++) {
+      media.push(await encodeMedia(String(keys[i]).slice(prefix.length), vals[i]));
+    }
+    return {
+      format: FORMAT,
+      version: VERSION,
+      savedAt: new Date().toISOString(),
+      project: project,
+      media: media,
+      extras: { localStorage: getLocalStorageSnapshot() }
+    };
+  }
+
   async function encodeMedia(id, v) {
     if (v instanceof ArrayBuffer) v = new Blob([v]);
     if (v instanceof Blob) return { id: id, kind: 'blob', type: v.type || '', data: await toDataURL(v) };
@@ -74,41 +137,51 @@
     statusEl.style.color = isErr ? '#fca5a5' : '#d1fae5';
   }
 
-  async function saveProject() {
+  async function saveProject(saveAs) {
     status('Saving...');
     var db = await openDB();
     try {
-      var id = new URLSearchParams(location.search).get('id');
-      if (!id) {
-        var all = await req(db.transaction(PROJ, 'readonly').objectStore(PROJ).getAll());
-        all.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
-        if (!all.length) { status('No project found yet. Add a clip in the editor, wait a second, then save.', true); return; }
-        id = all[0].id;
+      var id = await resolveCurrentProjectId(db);
+      if (!id) { status('No project found yet. Add a clip in the editor, wait a second, then save.', true); return; }
+      var payload = await buildProjectPayload(db, id);
+      if (!payload || !payload.project) { status('Project not found yet. Make a small change, wait a second, then save.', true); return; }
+      var name = String(payload.project.name || 'project').replace(/[^\w.-]+/g, '_').slice(0, 80) || 'project';
+      var fileName = name + '.autoedit.json';
+      var content = JSON.stringify(payload);
+
+      if (window.aeDesktop && window.aeDesktop.saveProjectFileAs && window.aeDesktop.saveProjectFile) {
+        var knownPath = saveAs ? '' : getSavedPathForProject(id);
+        if (!knownPath && !saveAs && window.aeDesktop.getLastProjectFilePath) {
+          var last = await window.aeDesktop.getLastProjectFilePath();
+          knownPath = last && last.path || '';
+        }
+        if (knownPath && !saveAs) {
+          var resSave = await window.aeDesktop.saveProjectFile(knownPath, content);
+          if (resSave && resSave.ok) {
+            setSavedPathForProject(id, resSave.path);
+            status('Saved complete project to ' + resSave.path + ' (' + payload.media.length + ' media files).');
+            return;
+          }
+        }
+        var resAs = await window.aeDesktop.saveProjectFileAs(fileName, content);
+        if (resAs && !resAs.canceled && resAs.path) {
+          setSavedPathForProject(id, resAs.path);
+          status('Saved complete project to ' + resAs.path + ' (' + payload.media.length + ' media files).');
+          return;
+        }
+        status('Save canceled.');
+        return;
       }
-      var project = await req(db.transaction(PROJ, 'readonly').objectStore(PROJ).get(id));
-      if (!project) { status('Project not found yet. Make a small change, wait a second, then save.', true); return; }
-      var prefix = id + '/';
-      var range = IDBKeyRange.bound(prefix, prefix + '\uffff');
-      var ms = db.transaction(MEDIA, 'readonly').objectStore(MEDIA);
-      var rk = ms.getAllKeys(range), rv = ms.getAll(range);
-      var keys = await req(rk), vals = await req(rv);
-      var media = [];
-      for (var i = 0; i < keys.length; i++) {
-        media.push(await encodeMedia(String(keys[i]).slice(prefix.length), vals[i]));
-      }
-      var payload = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), project: project, media: media };
-      var name = String(project.name || 'project').replace(/[^\w.-]+/g, '_').slice(0, 80) || 'project';
-      download(new Blob([JSON.stringify(payload)], { type: 'application/json' }), name + '.autoedit.json');
-      status('Saved "' + (project.name || 'project') + '" as ' + name + '.autoedit.json (' + media.length + ' media files).');
+
+      download(new Blob([content], { type: 'application/json' }), fileName);
+      status('Saved complete project as ' + fileName + ' (' + payload.media.length + ' media files).');
     } finally {
       db.close();
     }
   }
 
-  async function importFile(file) {
-    status('Opening ' + file.name + '...');
-    var data;
-    try { data = JSON.parse(await file.text()); } catch (e) { status('That file is not a valid project file.', true); return; }
+  async function importProjectData(data, fileName, openedPath) {
+    status('Opening ' + fileName + '...');
     if (!data || data.format !== FORMAT || !data.project || !data.project.id) {
       status('That file is not an AutoEditor project file.', true);
       return;
@@ -127,11 +200,30 @@
       var mstore = tx.objectStore(MEDIA);
       values.forEach(function (p) { mstore.put(p[1], newId + '/' + p[0]); });
       await txDone(tx);
+      if (data.extras && data.extras.localStorage) restoreLocalStorageSnapshot(data.extras.localStorage);
+      if (openedPath) setSavedPathForProject(newId, openedPath);
       status('Project opened.');
       location.href = '/editor?id=' + encodeURIComponent(newId);
     } finally {
       db.close();
     }
+  }
+
+  async function importFile(file) {
+    var data;
+    try { data = JSON.parse(await file.text()); } catch (e) { status('That file is not a valid project file.', true); return; }
+    return importProjectData(data, file.name || 'project file', '');
+  }
+
+  async function openProject() {
+    if (window.aeDesktop && window.aeDesktop.openProjectFile) {
+      var res = await window.aeDesktop.openProjectFile();
+      if (!res || res.canceled) return;
+      var parsed;
+      try { parsed = JSON.parse(String(res.text || '')); } catch (e) { status('That file is not a valid project file.', true); return; }
+      return importProjectData(parsed, res.path || 'project file', res.path || '');
+    }
+    return pickFile();
   }
 
   function pickFile() {
@@ -275,8 +367,9 @@
     var row = document.createElement('div');
     row.setAttribute('style', 'display:flex;gap:8px');
     row.appendChild(btn('Projects', function () { return openProjects(); }));
-    row.appendChild(btn('Save project file', saveProject));
-    row.appendChild(btn('Open project file', function () { pickFile(); }));
+    row.appendChild(btn('Save project', function () { return saveProject(false); }));
+    row.appendChild(btn('Save project as', function () { return saveProject(true); }));
+    row.appendChild(btn('Open project file', function () { return openProject(); }));
     row.appendChild(btn('Render folder', function () { return pickRenderPath(); }));
     row.appendChild(btn('Use Downloads', function () { return resetRenderPath(); }));
     renderPathEl = document.createElement('div');
