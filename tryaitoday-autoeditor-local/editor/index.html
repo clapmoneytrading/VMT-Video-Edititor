@@ -401,6 +401,8 @@
 
   var tracks = [];
   var tracksEl = null;
+  var voiceGain = 1;
+  var voiceGainEl = null;
   var trackSeq = 1;
   function parseTimePrefix(name) {
     var m = String(name || '').match(/(\d+)[-_](\d+)/);
@@ -578,7 +580,7 @@
       var audioInput = findUploadInput('audio');
       var existingVoice = await getCurrentVoiceFile();
       var mixSources = [];
-      if (existingVoice) mixSources.push({ files: [existingVoice], offsetSec: 0, gain: 1 });
+      if (existingVoice) mixSources.push({ files: [existingVoice], offsetSec: 0, gain: voiceGain });
       musicTracks.forEach(function (t) {
         mixSources.push({ files: t.files, offsetSec: Number(t.offsetSec || 0), gain: 0.45 });
       });
@@ -641,6 +643,12 @@
       tracksEl.appendChild(row);
     });
   }
+  function setVoicePreviewVolume(gain) {
+    var audioEls = Array.prototype.slice.call(document.querySelectorAll('audio'));
+    audioEls.forEach(function (a) {
+      if (a && !a.muted) a.volume = Math.max(0, Math.min(2, gain));
+    });
+  }
 
   function mount() {
     disableStorageLimitChecks();
@@ -651,6 +659,27 @@
     title.textContent = 'Project tools and tracks';
     statusEl = document.createElement('div');
     statusEl.setAttribute('style', 'font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:4px 8px;border-radius:6px;display:none');
+    voiceGainEl = document.createElement('div');
+    voiceGainEl.setAttribute('style', 'display:flex;align-items:center;gap:8px;font:12px system-ui,sans-serif;background:rgba(15,23,42,.9);padding:6px 8px;border-radius:6px;color:#e2e8f0');
+    var voiceLabel = document.createElement('span');
+    voiceLabel.textContent = 'Main voice volume';
+    var voiceRange = document.createElement('input');
+    voiceRange.type = 'range';
+    voiceRange.min = '0';
+    voiceRange.max = '2';
+    voiceRange.step = '0.05';
+    voiceRange.value = String(voiceGain);
+    voiceRange.setAttribute('style', 'width:140px');
+    var voiceVal = document.createElement('b');
+    voiceVal.textContent = voiceGain.toFixed(2) + 'x';
+    voiceRange.oninput = function () {
+      voiceGain = Number(voiceRange.value || 1);
+      voiceVal.textContent = voiceGain.toFixed(2) + 'x';
+      setVoicePreviewVolume(voiceGain);
+    };
+    voiceGainEl.appendChild(voiceLabel);
+    voiceGainEl.appendChild(voiceRange);
+    voiceGainEl.appendChild(voiceVal);
     var row = document.createElement('div');
     row.setAttribute('style', 'display:flex;flex-wrap:wrap;gap:8px');
     row.appendChild(btn('Projects', function () { return openProjects(); }));
@@ -671,6 +700,7 @@
     renderTracks();
     box.appendChild(title);
     box.appendChild(tracksEl);
+    box.appendChild(voiceGainEl);
     box.appendChild(renderPathEl);
     box.appendChild(statusEl);
     box.appendChild(row);
